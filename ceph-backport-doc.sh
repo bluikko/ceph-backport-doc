@@ -211,8 +211,7 @@ function set_github_token {
             github_token=$(cat "${github_token_file}")
             info "GitHub token read from ${github_token_file}"
         else
-            error "Environment variable github_token not set and file ${github_token_file} does not exist"
-            exit 1
+            error_fail "Environment variable github_token not set and file ${github_token_file} does not exist"
         fi
     else
         info "GitHub token set from environment variable"
@@ -386,8 +385,7 @@ else
 fi
 
 if [ -z "${1}" ] ; then
-    error "Need PR number as argument"
-    exit 1
+    error_fail "Need PR number as argument"
 fi
 if [ "${1}" == "--help" ] ; then
     print_usage
@@ -398,8 +396,7 @@ else
 fi
 
 if [ -z "${2}" ] ; then
-    error "Need release name as argument"
-    exit 1
+    error_fail "Need release name as argument"
 else
     target_release="${2}"
     info "Target release set to ${target_release}"
