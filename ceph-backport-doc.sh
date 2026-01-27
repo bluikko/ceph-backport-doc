@@ -29,6 +29,7 @@ set -e
 
 CEPH_UPSTREAM=https://github.com/ceph/ceph.git
 github_endpoint=https://github.com/ceph/ceph
+github_api_version="2022-11-28"
 
 github_token_file="$HOME/.github_token"
 full_path="$0"
@@ -225,7 +226,7 @@ function set_github_user_from_github_token {
     local curl_opts
     setup_ok=""
     [ "$github_token" ] || assert_fail "set_github_user_from_github_token: git_token not set"
-    curl_opts="--silent -u :${github_token} https://api.github.com/user"
+    curl_opts="--silent -u :${github_token} --header X-GitHub-Api-Version:${github_api_version} https://api.github.com/user"
     [ "$quiet" ] || set -x
     remote_api_output="$(curl $curl_opts)"
     set +x
@@ -245,7 +246,7 @@ function check_target_branch {
     local remote_api_output
     local api_error
 
-    remote_api_output=$(curl -u ${github_user}:${github_token} --silent "https://api.github.com/repos/ceph/ceph/branches/${target_release}")
+    remote_api_output=$(curl -u ${github_user}:${github_token} --silent --header "X-GitHub-Api-Version:${github_api_version}" "https://api.github.com/repos/ceph/ceph/branches/${target_release}")
     api_error=$(echo "${remote_api_output}" | jq -r .message 2>/dev/null | grep -v null || true)
     if [ "$api_error" ] ; then
         error_fail "GitHub API said: ->$api_error<-"
@@ -265,7 +266,7 @@ function get_and_validate_github_pr {
     local body_is
     local merge_commit_sha_is
 
-    remote_api_output=$(curl -u ${github_user}:${github_token} --silent "https://api.github.com/repos/ceph/ceph/pulls/${original_pr}")
+    remote_api_output=$(curl -u ${github_user}:${github_token} --silent --header "X-GitHub-Api-Version:${github_api_version}" "https://api.github.com/repos/ceph/ceph/pulls/${original_pr}")
 
     state_is=$(echo "$remote_api_output" | jq -r '.state')
     merged_is=$(echo "$remote_api_output" | jq -r '.merged')
@@ -341,7 +342,7 @@ ${desc}"
     echo "${desc}"
     info "Creating new GitHub PR '${backport_pr_title}'"
 
-    remote_api_output=$(curl -u ${github_user}:${github_token} --silent --data-binary "{\"title\":\"${backport_pr_title}\",\"head\":\"${source_repo}:${local_branch}\",\"base\":\"${target_release}\",\"body\":\"$(munge_body "${desc}")\"}" "https://api.github.com/repos/ceph/ceph/pulls")
+    remote_api_output=$(curl -u ${github_user}:${github_token} --silent --header "X-GitHub-Api-Version:${github_api_version}" --data-binary "{\"title\":\"${backport_pr_title}\",\"head\":\"${source_repo}:${local_branch}\",\"base\":\"${target_release}\",\"body\":\"$(munge_body "${desc}")\"}" "https://api.github.com/repos/ceph/ceph/pulls")
     backport_pr_number=$(echo "$remote_api_output" | jq -r .number)
     if [ -z "$backport_pr_number" ] || [ "$backport_pr_number" = "null" ] ; then
         error "failed to open backport PR"
