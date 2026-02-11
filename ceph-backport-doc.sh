@@ -311,7 +311,7 @@ function branch_and_cherry_pick {
     info "New local branch will be ${local_branch}"
 
     if git show-ref --verify --quiet "refs/remotes/upstream/$local_branch" ; then
-        error_fail "Local branch ${local_branch} already exists in upstream"
+        error_fail "${local_branch} branch already exists in upstream"
     fi
 
     if git show-ref --verify --quiet "refs/heads/$local_branch" ; then
@@ -321,14 +321,18 @@ function branch_and_cherry_pick {
             git checkout "$local_branch"
         fi
         if [ -f ".git/CHERRY_PICK_HEAD" ] ; then
-            error_fail "Cherry pick is in progress: resolve conflicts and issue 'git add <conflict file>', 'git cherry-pick --continue' and then re-run this script with the same arguments; or abort and abandon with 'git cherry-pick --abort'. Conflicted files: `list_conflict_files`"
+            error "Cherry pick is in progress: resolve conflicts and run 'git add <conflict file>',"
+            error "'git cherry-pick --continue' and then re-run this script with the same"
+            error "arguments; or abort and abandon with 'git cherry-pick --abort'."
+            error_fail "Conflicted files: `list_conflict_files`"
         else
             info "...checking if a cherry pick with conflicts was completed..."
             if git log -n 1 | fgrep -q "cherry picked from commit `git rev-list ${cherry_pick_sha}`" ; then
                 info "Cherry pick SHA exists in the latest commit log message, continuing"
                 cherry_pick_done=yes
             else
-                error_fail "Local branch ${local_branch} already exists, only allowed if the latest commit log contains the cherry pick commit SHA"
+                error "Local branch ${local_branch} already exists and the latest commit log does not"
+                error_fail "contain the cherry pick commit SHA"
             fi
         fi
     fi
@@ -340,7 +344,15 @@ function branch_and_cherry_pick {
         git checkout -b "$local_branch" FETCH_HEAD
 
         git fetch "$CEPH_UPSTREAM" "$merge_commit_sha"
-        git cherry-pick -x "${cherry_pick_sha}" || error_fail "git cherry-pick ${cherry_pick_sha} failed, check for conflicts and follow instructions from git above. After conflicts are resolved and 'git cherry-pick --continue' has succeeded, please re-run this script with the same arguments. Conflicted files: `list_conflict_files`"
+        if git cherry-pick -x "${cherry_pick_sha}" ; then
+            info "Cherry pick completed"
+        else
+            error "git cherry-pick ${cherry_pick_sha} failed, check for conflicts and follow"
+            error "instructions from git above. After conflicts are resolved and"
+            error "'git cherry-pick --continue' has succeeded, please re-run this script with"
+            error "the same arguments."
+            error_fail "Conflicted files: `list_conflict_files`"
+        fi
     fi
 }
 
