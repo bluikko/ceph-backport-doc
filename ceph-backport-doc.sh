@@ -44,6 +44,7 @@ cherry_pick_sha=""
 github_user=""
 # the original script has a fancy mechanism to get this from `git remote`
 upstream_remote="upstream"
+cherry_picking=1
 
 function print_in_hex {
     local str="$1"
@@ -192,6 +193,10 @@ function munge_body {
     echo "$*" | tr '\r' '\n' | sed 's/$/\\n/' | tr -d '\n'
 }
 
+function list_conflict_files {
+    git ls-files --unmerged | awk '{ print $4 }' | sort -u
+}
+
 function print_usage {
     echo "Usage: ${this_script} --help | --setup | [GitHub PR ID] [release name to backport to]"
     echo "Backport a Ceph docs GitHub PR to a stable branch."
@@ -301,16 +306,42 @@ function get_and_validate_github_pr {
 }
 
 function branch_and_cherry_pick {
+    local cherry_pick_done=no
     local_branch="wip-doc-$(date +%Y-%m-%d)-backport-${original_pr}-to-${target_release}"
     info "New local branch will be ${local_branch}"
 
-    git fetch "$CEPH_UPSTREAM" "refs/heads/${target_release}"
+    if git show-ref --verify --quiet "refs/remotes/upstream/$local_branch" ; then
+        error_fail "Local branch ${local_branch} already exists in upstream"
+    fi
 
-    git show-ref --verify --quiet "refs/heads/$local_branch" && error_fail "Local branch ${local_branch} already exists"
-    git checkout -b "$local_branch" FETCH_HEAD
+    if git show-ref --verify --quiet "refs/heads/$local_branch" ; then
+        info "${local_branch} already exists, checking cherry pick status..."
+        local current_branch=$(git rev-parse --abbrev-ref HEAD)
+        if [ "$current_branch" != "$local_branch" ] ; then
+            git checkout "$local_branch"
+        fi
+        if [ -f ".git/CHERRY_PICK_HEAD" ] ; then
+            error_fail "Cherry pick is in progress: resolve conflicts and issue 'git add <conflict file>', 'git cherry-pick --continue' and then re-run this script with the same arguments; or abort and abandon with 'git cherry-pick --abort'. Conflicted files: `list_conflict_files`"
+        else
+            info "...checking if a cherry pick with conflicts was completed..."
+            if git log -n 1 | fgrep -q "cherry picked from commit `git rev-list ${cherry_pick_sha}`" ; then
+                info "Cherry pick SHA exists in the latest commit log message, continuing"
+                cherry_pick_done=yes
+            else
+                error_fail "Local branch ${local_branch} already exists, only allowed if the latest commit log contains the cherry pick commit SHA"
+            fi
+        fi
+    fi
 
-    git fetch "$CEPH_UPSTREAM" "$merge_commit_sha"
-    git cherry-pick -x "${cherry_pick_sha}" || assert_fail "git cherry-pick ${cherry_pick_sha} failed, check for conflicts and follow instructions from git above"
+    if [ "$cherry_pick_done" == "no" ] ; then
+        git fetch "$CEPH_UPSTREAM" "refs/heads/${target_release}"
+
+        git show-ref --verify --quiet "refs/heads/$local_branch" && error_fail "Local branch ${local_branch} already exists" || info "Creating local branch"
+        git checkout -b "$local_branch" FETCH_HEAD
+
+        git fetch "$CEPH_UPSTREAM" "$merge_commit_sha"
+        git cherry-pick -x "${cherry_pick_sha}" || error_fail "git cherry-pick ${cherry_pick_sha} failed, check for conflicts and follow instructions from git above. After conflicts are resolved and 'git cherry-pick --continue' has succeeded, please re-run this script with the same arguments. Conflicted files: `list_conflict_files`"
+    fi
 }
 
 function push_to_github {
