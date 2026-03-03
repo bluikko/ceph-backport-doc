@@ -54,7 +54,7 @@ The script needs to be run from inside your `ceph` git repository local copy.
 ## Example Usage
 
 ```console
-~/ceph-backport-doc.sh 19202010 tentacle
+~/ceph-backport-doc.sh 1920210 tentacle
 ```
 
 ## Cherry Pick Conflicts
