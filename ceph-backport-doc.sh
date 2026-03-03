@@ -17,7 +17,8 @@ set -e
 # Usage:
 #
 #     ceph-backport-doc.sh --help
-#     ceph-backport-doc.sh [GitHub PR ID] [release name to backport to]
+#     ceph-backport-doc.sh <GitHub PR ID> <release name to backport to>
+#     ceph-backport-doc.sh --test <GitHub PR ID> <release name to backport to>
 #
 # Example:
 #
@@ -44,7 +45,7 @@ cherry_pick_sha=""
 github_user=""
 # the original script has a fancy mechanism to get this from `git remote`
 upstream_remote="upstream"
-cherry_picking=1
+test_mode=no
 
 function print_in_hex {
     local str="$1"
@@ -198,12 +199,13 @@ function list_conflict_files {
 }
 
 function print_usage {
-    echo "Usage: ${this_script} --help | --setup | [GitHub PR ID] [release name to backport to]"
+    echo "Usage: ${this_script} --help | --setup | [--test] <GitHub PR ID> <release name to backport to>"
     echo "Backport a Ceph docs GitHub PR to a stable branch."
     echo ""
     echo "Arguments:"
     echo "    --help    print this help"
     echo "    --setup   configure settings (not implemented)"
+    echo "    --test    test if cherry-pick would succeed or conflict"
     echo ""
     echo "Example: ${this_script} 1920210 tentacle"
     echo ""
@@ -338,6 +340,7 @@ function branch_and_cherry_pick {
     fi
 
     if [ "$cherry_pick_done" == "no" ] ; then
+        local cherry_pick_status=""
         git fetch "$CEPH_UPSTREAM" "refs/heads/${target_release}"
 
         git show-ref --verify --quiet "refs/heads/$local_branch" && error_fail "Local branch ${local_branch} already exists" || info "Creating local branch"
@@ -345,13 +348,28 @@ function branch_and_cherry_pick {
 
         git fetch "$CEPH_UPSTREAM" "$merge_commit_sha"
         if git cherry-pick -x "${cherry_pick_sha}" ; then
-            info "Cherry pick completed"
+            info "git cherry-pick ${cherry_pick_sha} completed"
+            cherry_pick_status="succeeded"
         else
-            error "git cherry-pick ${cherry_pick_sha} failed, check for conflicts and follow"
-            error "instructions from git above. After conflicts are resolved and"
-            error "'git cherry-pick --continue' has succeeded, please re-run this script with"
-            error "the same arguments."
-            error_fail "Conflicted files: `list_conflict_files`"
+            error "git cherry-pick ${cherry_pick_sha} failed"
+            cherry_pick_status="failed"
+            if [ "$test_mode" == "no" ] ; then
+                error "check for conflicts and follow"
+                error "instructions from git above. After conflicts are resolved and"
+                error "'git cherry-pick --continue' has succeeded, please re-run this script with"
+                error "the same arguments."
+                error_fail "Conflicted files: `list_conflict_files`"
+            fi
+        fi
+        if [ "$test_mode" == "yes" ] ; then
+            git checkout "$target_release"
+            git branch -D "$local_branch"
+            info "git cherry-pick status: $cherry_pick_status"
+            if [ "$cherry_pick_status" == "succeeded" ] ; then
+                exit 0
+            else
+                exit 1
+            fi
         fi
     fi
 }
@@ -428,16 +446,23 @@ else
     error_fail "This script needs \"jq\" in order to work, and it is not available"
 fi
 
-if [ -z "${1}" ] ; then
-    error_fail "Need PR number as argument"
-fi
-if [ "${1}" == "--help" ] ; then
+if [ -z "${1}" ] || [ "${1}" == "--help" ] ; then
     print_usage
     exit 0
-else
-    original_pr="${1}"
-    info "GitHub PR number set to ${original_pr}"
 fi
+
+if [ "${1}" == "--test" ] ; then
+    test_mode="yes"
+    shift
+fi
+
+if ! [[ "${1}" =~ ^[1-9][0-9]+$ ]] ; then
+    print_usage
+    exit 0
+fi
+
+original_pr="${1}"
+info "GitHub PR number set to ${original_pr}"
 
 if [ -z "${2}" ] ; then
     error_fail "Need release name as argument"
