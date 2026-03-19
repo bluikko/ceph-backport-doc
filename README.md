@@ -46,7 +46,7 @@ git remote -v
 ## Usage
 
 ```console
-/path/to/ceph-backport-doc.sh <stable branch name> <GitHub PR ID>
+/path/to/ceph-backport-doc.sh [--test] [--message <PR body line>] <stable branch name> <GitHub PR ID>
 ```
 
 The script needs to be run from inside your `ceph` git repository local copy.
