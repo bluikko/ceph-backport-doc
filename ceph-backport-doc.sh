@@ -17,8 +17,8 @@ set -e
 # Usage:
 #
 #     ceph-backport-doc.sh --help
-#     ceph-backport-doc.sh <GitHub PR ID> <release name to backport to>
-#     ceph-backport-doc.sh --test <GitHub PR ID> <release name to backport to>
+#     ceph-backport-doc.sh <release name to backport to> <GitHub PR ID>
+#     ceph-backport-doc.sh --test <release name to backport to> <GitHub PR ID>
 #
 # Example:
 #
@@ -46,6 +46,7 @@ github_user=""
 # the original script has a fancy mechanism to get this from `git remote`
 upstream_remote="upstream"
 test_mode=no
+pr_body_message=""
 
 function print_in_hex {
     local str="$1"
@@ -199,13 +200,14 @@ function list_conflict_files {
 }
 
 function print_usage {
-    echo "Usage: ${this_script} --help | --setup | [--test] <GitHub PR ID> <release name to backport to>"
+    echo "Usage: ${this_script} --help | --setup | [--test] [--message <line>] <release name> <GitHub PR ID>"
     echo "Backport a Ceph docs GitHub PR to a stable branch."
     echo ""
     echo "Arguments:"
     echo "    --help    print this help"
     echo "    --setup   configure settings (not implemented)"
     echo "    --test    test if cherry-pick would succeed or conflict"
+    echo "    --message add the specified message to top of the PR body"
     echo ""
     echo "Example: ${this_script} 1920210 tentacle"
     echo ""
@@ -359,6 +361,9 @@ function branch_and_cherry_pick {
                 error "'git cherry-pick --continue' has succeeded, please re-run this script with"
                 error "the same arguments."
                 error_fail "Conflicted files: `list_conflict_files`"
+            else
+                error "Conflicted files: `list_conflict_files`"
+                git cherry-pick --abort
             fi
         fi
         if [ "$test_mode" == "yes" ] ; then
@@ -394,12 +399,11 @@ function open_new_github_pr {
     if [[ "$desc" =~ \" ]] ; then
         desc="${desc//\"/}"
     fi
-    desc="backport of ${original_pr_url}
-
+    desc="backport of ${original_pr_url} (generated with ceph-backport-doc.sh)
+${pr_body_message}
 ---
 
 ${desc}"
-
     echo "${desc}"
     info "Creating new GitHub PR '${backport_pr_title}'"
 
@@ -455,6 +459,27 @@ if [ "${1}" == "--test" ] ; then
     test_mode="yes"
     shift
 fi
+if [ "${1}" == "--message" ] ; then
+    shift
+    if [ -z "${1}" ] ; then
+        print_usage
+        exit 0
+    fi
+    pr_body_message="${1}"
+    info "Adding to the top of the new PR: '$pr_body_message'"
+    # add newline so that the PR body will be correctly formatted
+    pr_body_message="${pr_body_message}
+"
+    shift
+fi
+
+if [ -z "${1}" ] ; then
+    error_fail "Need release name as argument"
+else
+    target_release="${1}"
+    info "Target release set to ${target_release}"
+    shift
+fi
 
 if ! [[ "${1}" =~ ^[1-9][0-9]+$ ]] ; then
     print_usage
@@ -463,13 +488,6 @@ fi
 
 original_pr="${1}"
 info "GitHub PR number set to ${original_pr}"
-
-if [ -z "${2}" ] ; then
-    error_fail "Need release name as argument"
-else
-    target_release="${2}"
-    info "Target release set to ${target_release}"
-fi
 
 set_github_token
 set_github_user_from_github_token quiet

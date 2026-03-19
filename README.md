@@ -46,15 +46,17 @@ git remote -v
 ## Usage
 
 ```console
-/path/to/ceph-backport-doc.sh <GitHub PR ID> <stable branch name>
+/path/to/ceph-backport-doc.sh <stable branch name> <GitHub PR ID>
 ```
 
 The script needs to be run from inside your `ceph` git repository local copy.
 
 ## Example Usage
 
+Create a backport PR to the `tentacle` stable branch from a single PR #1920210:
+
 ```console
-~/ceph-backport-doc.sh 1920210 tentacle
+~/ceph-backport-doc.sh tentacle 1920210
 ```
 
 ## Cherry Pick Conflicts
