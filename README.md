@@ -46,7 +46,7 @@ git remote -v
 ## Usage
 
 ```console
-/path/to/ceph-backport-doc.sh [--test] [--message <PR body line>] <stable branch name> <GitHub PR ID>
+/path/to/ceph-backport-doc.sh [--test] [--draft] [--message <PR body line>] [--title <PR title line>] <stable branch name> <GitHub PR ID>...
 ```
 
 The script needs to be run from inside your `ceph` git repository local copy.
@@ -57,6 +57,13 @@ Create a backport PR to the `tentacle` stable branch from a single PR #1920210:
 
 ```console
 ~/ceph-backport-doc.sh tentacle 1920210
+```
+
+Create a backport PR to the `tentacle` stable branch from multiple PRs #1920210
+#1920221 #1920222 demonstrating the use of various arguments:
+
+```console
+~/ceph-backport-doc.sh --draft --message 'Backport feature X' --title 'doc: Batch backport for feature X' tentacle 1920210 1920221 1920222
 ```
 
 ## Cherry Pick Conflicts

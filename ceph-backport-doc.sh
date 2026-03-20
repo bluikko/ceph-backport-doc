@@ -14,15 +14,17 @@ set -e
 #
 #     ceph-backport-doc.sh --setup (not implemented as of now)
 #
-# Usage:
+# Usage (simplified, see --help for full usage):
 #
 #     ceph-backport-doc.sh --help
 #     ceph-backport-doc.sh <release name to backport to> <GitHub PR ID>
 #     ceph-backport-doc.sh --test <release name to backport to> <GitHub PR ID>
+#     ceph-backport-doc.sh --title <PR title> <release name to backport to> <GitHub PR ID> <GitHub PR ID>...
 #
 # Example:
 #
-#     ceph-backport-doc.sh 1920210 tentacle
+#     ceph-backport-doc.sh tentacle 1920210
+#     ceph-backport-doc.sh --title 'doc: Backport feature X' tentacle 1920210 1920221 1920222
 #
 
 # A GitHub access token is expected either in the environment variable
@@ -36,17 +38,17 @@ github_token_file="$HOME/.github_token"
 full_path="$0"
 this_script=$(basename "$full_path")
 local_branch=""
-original_pr=""
 original_pr_title=""
 original_pr_body=""
 original_pr_url=""
 merge_commit_sha=""
-cherry_pick_sha=""
 github_user=""
 # the original script has a fancy mechanism to get this from `git remote`
 upstream_remote="upstream"
-test_mode=no
+test_mode=false
+draft_mode=false
 pr_body_message=""
+pr_title=""
 
 function print_in_hex {
     local str="$1"
@@ -200,16 +202,18 @@ function list_conflict_files {
 }
 
 function print_usage {
-    echo "Usage: ${this_script} --help | --setup | [--test] [--message <line>] <release name> <GitHub PR ID>"
+    echo "Usage: ${this_script} --help | --setup | [--test] [--draft] [--message <line>] [--title <title>] <release name> <GitHub PR ID>..."
     echo "Backport a Ceph docs GitHub PR to a stable branch."
     echo ""
     echo "Arguments:"
     echo "    --help    print this help"
     echo "    --setup   configure settings (not implemented)"
     echo "    --test    test if cherry-pick would succeed or conflict"
+    echo "    --draft   open PR as a draft"
     echo "    --message add the specified message to top of the PR body"
+    echo "    --title   set the PR title (required for multiple PR IDs, must start with 'doc')"
     echo ""
-    echo "Example: ${this_script} 1920210 tentacle"
+    echo "Example: ${this_script} tentacle 1920210"
     echo ""
     echo "GitHub token is read from env var github_token or from file ${github_token_file}"
 }
@@ -275,43 +279,51 @@ function get_and_validate_github_pr {
     local body_is
     local merge_commit_sha_is
 
-    remote_api_output=$(curl -u ${github_user}:${github_token} --silent --header "X-GitHub-Api-Version:${github_api_version}" "https://api.github.com/repos/ceph/ceph/pulls/${original_pr}")
+    for i_pr in "${@}" ; do
+        info "Validating GitHub PR ${i_pr}"
 
-    state_is=$(echo "$remote_api_output" | jq -r '.state')
-    merged_is=$(echo "$remote_api_output" | jq -r '.merged')
-    draft_is=$(echo "$remote_api_output" | jq -r '.draft')
-    base_is=$(echo "$remote_api_output" | jq -r '.base.label')
-    commits_is=$(echo "$remote_api_output" | jq -r '.commits')
-    title_is=$(echo "$remote_api_output" | jq -r '.title')
-    body_is="$(echo "$remote_api_output" | jq -r '.body')"
-    html_url_is=$(echo "$remote_api_output" | jq -r '.html_url')
-    merge_commit_sha_is=$(printf '%s' "$remote_api_output" | jq -r '.merge_commit_sha')
+        remote_api_output=$(curl -u ${github_user}:${github_token} --silent --header "X-GitHub-Api-Version:${github_api_version}" "https://api.github.com/repos/ceph/ceph/pulls/${i_pr}")
+        api_error=$(echo "${remote_api_output}" | jq -r .message 2>/dev/null | grep -v null || true)
+        if [ "$api_error" ] ; then
+            error_fail "GitHub API said: ->$api_error<-"
+        fi
 
-    test_expected "closed" "${state_is}" "PR state"
-    test_expected "true" "${merged_is}" "PR merged"
-    test_expected "false" "${draft_is}" "PR draft"
-    test_expected "ceph:main" "${base_is}" "PR base"
-    test_expected "1" "${commits_is}" "PR commits"
-    test_exists "${title_is}" "PR title"
-    test_exists "${body_is}" "PR body"
-    test_exists "${html_url_is}" "PR URL"
-    test_exists "${merge_commit_sha_is}" "PR merge commit SHA"
-    original_pr_title="${title_is}"
-    original_pr_body="${body_is}"
-    original_pr_url="${html_url_is}"
-    merge_commit_sha="${merge_commit_sha_is}"
-    cherry_pick_sha="${merge_commit_sha}^..${merge_commit_sha}^2"
+        state_is=$(echo "$remote_api_output" | jq -r '.state')
+        merged_is=$(echo "$remote_api_output" | jq -r '.merged')
+        draft_is=$(echo "$remote_api_output" | jq -r '.draft')
+        base_is=$(echo "$remote_api_output" | jq -r '.base.label')
+        commits_is=$(echo "$remote_api_output" | jq -r '.commits')
+        title_is=$(echo "$remote_api_output" | jq -r '.title')
+        body_is="$(echo "$remote_api_output" | jq -r '.body')"
+        html_url_is=$(echo "$remote_api_output" | jq -r '.html_url')
+        merge_commit_sha_is=$(printf '%s' "$remote_api_output" | jq -r '.merge_commit_sha')
 
-    if [ "${original_pr_title:0:3}" != "doc" ] ; then
-        error_fail "The PR title '${original_pr_title}' does not start with 'doc', is this a docs PR?"
-    fi
+        test_expected "closed" "${state_is}" "PR state"
+        test_expected "true" "${merged_is}" "PR merged"
+        test_expected "false" "${draft_is}" "PR draft"
+        test_expected "ceph:main" "${base_is}" "PR base"
+        test_expected "1" "${commits_is}" "PR commits"
+        test_exists "${title_is}" "PR title"
+        test_exists "${body_is}" "PR body"
+        test_exists "${html_url_is}" "PR URL"
+        test_exists "${merge_commit_sha_is}" "PR merge commit SHA"
+        original_pr_title="${title_is}"
+        original_pr_body="${body_is}"
+        original_pr_url="${html_url_is}"
+        merge_commit_sha="${merge_commit_sha} ${merge_commit_sha_is}"
 
-    info "PR ${original_pr} looks viable: title '${original_pr_title}', merge_commit_sha ${merge_commit_sha}"
+        if [ "${original_pr_title:0:3}" != "doc" ] ; then
+            error_fail "The PR title '${original_pr_title}' does not start with 'doc', is this a docs PR?"
+        fi
+
+        info "PR ${i_pr} looks viable: title '${original_pr_title}', merge_commit_sha ${merge_commit_sha_is}"
+    done
 }
 
 function branch_and_cherry_pick {
     local cherry_pick_done=no
-    local_branch="wip-doc-$(date +%Y-%m-%d)-backport-${original_pr}-to-${target_release}"
+
+    local_branch="wip-doc-backport-`IFS='-'; echo "${*}"`-to-${target_release}"
     info "New local branch will be ${local_branch}"
 
     if git show-ref --verify --quiet "refs/remotes/upstream/$local_branch" ; then
@@ -331,48 +343,57 @@ function branch_and_cherry_pick {
             error_fail "Conflicted files: `list_conflict_files`"
         else
             info "...checking if a cherry pick with conflicts was completed..."
-            if git log -n 1 | fgrep -q "cherry picked from commit `git rev-list ${cherry_pick_sha}`" ; then
-                info "Cherry pick SHA exists in the latest commit log message, continuing"
-                cherry_pick_done=yes
-            else
-                error "Local branch ${local_branch} already exists and the latest commit log does not"
-                error_fail "contain the cherry pick commit SHA"
-            fi
+            for i_sha in ${merge_commit_sha} ; do
+                local cherry_pick_sha="${i_sha}^..${i_sha}^2"
+                if git log -n 1 | fgrep -q "cherry picked from commit `git rev-list ${cherry_pick_sha}`" ; then
+                    info "Cherry pick SHA exists in the latest commit log message, continuing"
+                    cherry_pick_done=yes
+                else
+                    error "Local branch ${local_branch} already exists and the latest commit log does not"
+                    error_fail "contain the cherry pick commit SHA '`git rev-list ${cherry_pick_sha}`' (${cherry_pick_sha})"
+                fi
+            done
         fi
     fi
 
     if [ "$cherry_pick_done" == "no" ] ; then
         local cherry_pick_status=""
+        local cherry_pick_sha=""
+
         git fetch "$CEPH_UPSTREAM" "refs/heads/${target_release}"
 
         git show-ref --verify --quiet "refs/heads/$local_branch" && error_fail "Local branch ${local_branch} already exists" || info "Creating local branch"
         git checkout -b "$local_branch" FETCH_HEAD
 
-        git fetch "$CEPH_UPSTREAM" "$merge_commit_sha"
-        if git cherry-pick -x "${cherry_pick_sha}" ; then
-            info "git cherry-pick ${cherry_pick_sha} completed"
-            cherry_pick_status="succeeded"
-        else
-            error "git cherry-pick ${cherry_pick_sha} failed"
-            cherry_pick_status="failed"
-            if [ "$test_mode" == "no" ] ; then
-                error "check for conflicts and follow"
-                error "instructions from git above. After conflicts are resolved and"
-                error "'git cherry-pick --continue' has succeeded, please re-run this script with"
-                error "the same arguments."
-                error_fail "Conflicted files: `list_conflict_files`"
+        git fetch "$CEPH_UPSTREAM" ${merge_commit_sha}
+        for i_sha in ${merge_commit_sha} ; do
+            cherry_pick_sha="${i_sha}^..${i_sha}^2"
+            if git cherry-pick -x ${cherry_pick_sha} ; then
+                info "git cherry-pick ${cherry_pick_sha} completed"
+                cherry_pick_status="succeeded"
             else
-                error "Conflicted files: `list_conflict_files`"
-                git cherry-pick --abort
+                error "git cherry-pick ${cherry_pick_sha} failed"
+                if [ -f ".git/CHERRY_PICK_HEAD" ] ; then
+                    cherry_pick_status="failed"
+                    if [ "$test_mode" == "false" ] ; then
+                        error "check for conflicts and follow"
+                        error "instructions from git above. After conflicts are resolved and"
+                        error "'git cherry-pick --continue' has succeeded, please re-run this script with"
+                        error "the same arguments."
+                        error_fail "Conflicted files: `list_conflict_files`"
+                    else
+                        error "Conflicted files: `list_conflict_files`"
+                        git cherry-pick --abort
+                    fi
+                fi
+                break
             fi
-        fi
-        if [ "$test_mode" == "yes" ] ; then
+        done
+        if [ "$test_mode" == "true" ] ; then
             git checkout "$target_release"
             git branch -D "$local_branch"
             info "git cherry-pick status: $cherry_pick_status"
-            if [ "$cherry_pick_status" == "succeeded" ] ; then
-                exit 0
-            else
+            if [ "$cherry_pick_status" != "succeeded" ] ; then
                 exit 1
             fi
         fi
@@ -381,38 +402,61 @@ function branch_and_cherry_pick {
 
 function push_to_github {
     local current_branch=$(git rev-parse --abbrev-ref HEAD)
-    if [ "$current_branch" != "$local_branch" ] ; then
-        git checkout "$local_branch"
+
+    if [ "$test_mode" == "false" ] ; then
+        if [ "$current_branch" != "$local_branch" ] ; then
+            git checkout "$local_branch"
+        fi
+
+        git push -u origin "$local_branch"
+    else
+        info "Skipping 'git push' due to test mode"
     fi
-    
-    git push -u origin "$local_branch"
 }
 
 function open_new_github_pr {
-    local backport_pr_title="${target_release}: ${original_pr_title}"
-    local desc="$(clip_pr_body "$original_pr_body")"
+    local backport_pr_title="${target_release}: ${pr_title:-$original_pr_title}"
+    local desc
     local source_repo="${github_user}"
 
     if [[ "$backport_pr_title" =~ \" ]] ; then
         backport_pr_title="${new_pr_title//\"/\\\"}"
     fi
-    if [[ "$desc" =~ \" ]] ; then
-        desc="${desc//\"/}"
-    fi
-    desc="backport of ${original_pr_url} (generated with ceph-backport-doc.sh)
+    if [[ "${#}" -eq 1 ]] ; then
+        desc="$(clip_pr_body "$original_pr_body")"
+        if [[ "$desc" =~ \" ]] ; then
+            desc="${desc//\"/}"
+        fi
+        desc="backport of ${original_pr_url} (generated with ceph-backport-doc.sh)
+
 ${pr_body_message}
 ---
 
 ${desc}"
+    else
+        desc="backport of the following PRs (generated with ceph-backport-doc.sh)
+
+${pr_body_message}
+---
+"
+        for i_pr in "${@}" ; do
+            desc="${desc}
+- #${i_pr}"
+        done
+    fi
     echo "${desc}"
     info "Creating new GitHub PR '${backport_pr_title}'"
 
-    remote_api_output=$(curl -u ${github_user}:${github_token} --silent --header "X-GitHub-Api-Version:${github_api_version}" --data-binary "{\"title\":\"${backport_pr_title}\",\"head\":\"${source_repo}:${local_branch}\",\"base\":\"${target_release}\",\"body\":\"$(munge_body "${desc}")\"}" "https://api.github.com/repos/ceph/ceph/pulls")
-    backport_pr_number=$(echo "$remote_api_output" | jq -r .number)
-    if [ -z "$backport_pr_number" ] || [ "$backport_pr_number" = "null" ] ; then
-        error "failed to open backport PR"
-        echo "${remote_api_output}"
-        exit 1
+    if [ "$test_mode" == "false" ] ; then
+        remote_api_output=$(curl -u ${github_user}:${github_token} --silent --header "X-GitHub-Api-Version:${github_api_version}" --data-binary "{\"title\":\"${backport_pr_title}\",\"head\":\"${source_repo}:${local_branch}\",\"base\":\"${target_release}\",\"draft\":\"${draft_mode}\",\"body\":\"$(munge_body "${desc}")\"}" "https://api.github.com/repos/ceph/ceph/pulls")
+        backport_pr_number=$(echo "$remote_api_output" | jq -r .number)
+        if [ -z "$backport_pr_number" ] || [ "$backport_pr_number" = "null" ] ; then
+            error "failed to open backport PR"
+            echo "${remote_api_output}"
+            exit 1
+        fi
+    else
+        backport_pr_number="1920210"
     fi
     local backport_pr_url="${github_endpoint}/pull/$backport_pr_number"
     info "Opened backport PR ${backport_pr_url}"
@@ -456,8 +500,14 @@ if [ -z "${1}" ] || [ "${1}" == "--help" ] ; then
 fi
 
 if [ "${1}" == "--test" ] ; then
-    test_mode="yes"
+    test_mode="true"
     shift
+    info "Running in test mode, no remote changes or local repository permanent changes"
+fi
+if [ "${1}" == "--draft" ] ; then
+    draft_mode="true"
+    shift
+    info "Creating GitHub PR as a draft"
 fi
 if [ "${1}" == "--message" ] ; then
     shift
@@ -472,6 +522,19 @@ if [ "${1}" == "--message" ] ; then
 "
     shift
 fi
+if [ "${1}" == "--title" ] ; then
+    shift
+    if [ -z "${1}" ] ; then
+        print_usage
+        exit 0
+    fi
+    if [ "${1:0:3}" != "doc" ] ; then
+        error_fail "The PR title '${1}' does not start with 'doc'"
+    fi
+    pr_title="${1}"
+    info "Setting the PR title: '$pr_title'"
+    shift
+fi
 
 if [ -z "${1}" ] ; then
     error_fail "Need release name as argument"
@@ -481,19 +544,26 @@ else
     shift
 fi
 
-if ! [[ "${1}" =~ ^[1-9][0-9]+$ ]] ; then
-    print_usage
-    exit 0
+for i_pr in "${@}" ; do
+    if ! [[ "${i_pr}" =~ ^[1-9][0-9]+$ ]] ; then
+        print_usage
+        exit 0
+    fi
+done
+
+if [ "${#}" -gt 1 ] && [ -z "$pr_title" ] ; then
+    error_fail "Need PR title set with --title if multiple PR IDs are specified"
 fi
 
-original_pr="${1}"
-info "GitHub PR number set to ${original_pr}"
+info "Backporting PR(s): ${@}"
 
 set_github_token
 set_github_user_from_github_token quiet
 
 check_target_branch
-get_and_validate_github_pr
-branch_and_cherry_pick
+
+get_and_validate_github_pr "${@}"
+branch_and_cherry_pick "${@}"
+
 push_to_github
-open_new_github_pr
+open_new_github_pr "${@}"
