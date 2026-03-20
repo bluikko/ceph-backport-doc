@@ -16,9 +16,17 @@ Differences between this script and the official one:
 * **Simplified**: Skips a lot of the rather unnecessary polish like the
   interactive configuration feature, git upstream remote auto-detection
   (hardcoded to `upstream`), etc.
-* **PR description**: PR description from the original development branch PR is
-  automatically copied in full to the backport PR with a reference to the
-  original PR.
+* **Batch backport**: Include commits from several PRs in a single batch
+  backport PR.
+* **PR customization**:
+  * PR body from the original development branch PR is automatically copied in
+    full to the backport PR with a reference to the original PR.
+  * PR body for a batch backport PR will list the original PRs instead of
+    copying the full PR bodies.
+  * Custom PR title is supported and required for batch backport PRs.
+  * Custom line can be added to the top of the PR body. Recommended for
+    batch backport PRs.
+  * PR can be opened as a draft.
 
 ## Dependencies
 
