@@ -18,6 +18,10 @@ Differences between this script and the official one:
   (hardcoded to `upstream`), etc.
 * **Batch backport**: Include commits from several PRs in a single batch
   backport PR.
+* **Test mode**: Runs the whole backport process without making permanent
+  changes in the local fork and without making any changes in any remote
+  resources. Useful, especially for batch backports, for checking
+  if `git cherry-pick` would succeed.
 * **PR customization**:
   * PR body from the original development branch PR is automatically copied in
     full to the backport PR with a reference to the original PR.
