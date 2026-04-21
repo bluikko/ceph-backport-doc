@@ -90,7 +90,7 @@ If cherry pick conflicts, resolve the conflict as usual:
 
 And then re-run the script with the exact same arguments.
 
-**Not supported on the `reftables` backend currently.**
+**Not supported on the `reftable` backend currently.**
 
 The script will check that cherry pick is completed, the backport branch does
 not already exist upstream and that the latest commit log message includes the
